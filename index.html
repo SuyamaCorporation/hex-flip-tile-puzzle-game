@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hex Flip Tile Toggle Puzzle Game</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .hint-glow polygon { filter: drop-shadow(0 0 6px #fbbf24); }
+  svg { display: block; }
+</style>
+</head>
+<body class="bg-gray-900 min-h-screen text-white font-sans">
+
+<div class="max-w-2xl mx-auto p-4">
+  <h1 class="text-3xl font-bold text-center text-yellow-400 mb-1">⬡ Hex Flip Puzzle</h1>
+  <p class="text-center text-gray-400 mb-4 text-sm">Toggle all tiles to the same state</p>
+
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <div class="flex items-center gap-2">
+      <label class="text-sm text-gray-300" for="difficulty">Difficulty:</label>
+      <select id="difficulty" onchange="newGame()"
+        class="bg-gray-700 text-white border border-gray-600 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+        <option value="2">Easy (2)</option>
+        <option value="3" selected>Medium (3)</option>
+        <option value="4">Hard (4)</option>
+        <option value="5">Expert (5)</option>
+        <option value="6">Master (6)</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-sm text-gray-300">Moves: <span id="move-count" class="font-bold text-yellow-400">0</span></span>
+      <button onclick="showHint()" class="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded text-sm transition" aria-label="Show hint">
+        💡 Hint
+      </button>
+      <button onclick="newGame()" class="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-sm transition" aria-label="New game">
+        New Game
+      </button>
+    </div>
+  </div>
+
+  <div id="win-msg" class="hidden text-center bg-yellow-500 text-gray-900 font-bold py-3 rounded-xl mb-4 text-lg" role="alert">
+    🎉 Solved! <span id="win-moves"></span>
+  </div>
+
+  <div class="bg-gray-800 rounded-2xl p-4 flex justify-center items-center overflow-auto" style="min-height:360px;">
+    <svg id="hex-svg" aria-label="Hex puzzle grid" role="img"></svg>
+  </div>
+
+  <p class="text-center text-xs text-gray-500 mt-3">Click a tile to toggle it and its neighbors. Make all tiles the same color.</p>
+</div>
+
+<script>
+const HEX_SIZE = 30;
+const diffMap = { '2':2, '3':3, '4':4, '5':5, '6':6 };
+
+let grid = {};
+let gridSize = 3;
+let moves = 0;
+let hintCell = null;
+
+function hexPoints(cx, cy, size) {
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    pts.push((cx + size * Math.cos(angle)).toFixed(2) + ',' + (cy + size * Math.sin(angle)).toFixed(2));
+  }
+  return pts.join(' ');
+}
+
+function axialNeighbors(q, r) {
+  return [[q+1,r],[q-1,r],[q,r+1],[q,r-1],[q+1,r-1],[q-1,r+1]];
+}
+
+function inGrid(q, r) {
+  return Math.abs(q) <= gridSize && Math.abs(r) <= gridSize && Math.abs(q+r) <= gridSize;
+}
+
+function cellKey(q, r) { return q + ',' + r; }
+
+function newGame() {
+  const diff = document.getElementById('difficulty').value;
+  gridSize = diffMap[diff] || 3;
+  moves = 0;
+  hintCell = null;
+  document.getElementById('move-count').textContent = '0';
+  document.getElementById('win-msg').classList.add('hidden');
+
+  grid = {};
+  const cells = [];
+  for (let q = -gridSize; q <= gridSize; q++) {
+    for (let r = -gridSize; r <= gridSize; r++) {
+      if (Math.abs(q+r) <= gridSize) {
+        grid[cellKey(q,r)] = 0;
+        cells.push([q,r]);
+      }
+    }
+  }
+
+  // Scramble by applying random toggles
+  const numMoves = gridSize * 4 + Math.floor(Math.random() * gridSize * 3 + 5);
+  for (let i = 0; i < numMoves; i++) {
+    const [q, r] = cells[Math.floor(Math.random() * cells.length)];
+    applyToggle(q, r, false);
+  }
+
+  renderGrid();
+}
+
+function applyToggle(q, r, countMove) {
+  if (countMove === undefined) countMove = true;
+  const toToggle = [[q,r]].concat(axialNeighbors(q,r).filter(function(p){ return inGrid(p[0],p[1]); }));
+  for (let i = 0; i < toToggle.length; i++) {
+    const k = cellKey(toToggle[i][0], toToggle[i][1]);
+    if (k in grid) grid[k] ^= 1;
+  }
+  if (countMove) {
+    moves++;
+    document.getElementById('move-count').textContent = moves;
+    hintCell = null;
+    checkWin();
+  }
+}
+
+function checkWin() {
+  const vals = Object.values(grid);
+  if (vals.length > 0 && vals.every(function(v){ return v === vals[0]; })) {
+    document.getElementById('win-msg').classList.remove('hidden');
+    document.getElementById('win-moves').textContent = 'Solved in ' + moves + ' move' + (moves !== 1 ? 's' : '') + '!';
+  }
+}
+
+function computeHint() {
+  const vals = Object.values(grid);
+  const ones = vals.filter(function(v){ return v === 1; }).length;
+  const target = ones > vals.length / 2 ? 1 : 0;
+
+  let bestCell = null;
+  let bestScore = -Infinity;
+  for (const k in grid) {
+    const parts = k.split(',');
+    const q = parseInt(parts[0]), r = parseInt(parts[1]);
+    const affected = [[q,r]].concat(axialNeighbors(q,r).filter(function(p){ return inGrid(p[0],p[1]); }));
+    let score = 0;
+    for (let i = 0; i < affected.length; i++) {
+      const ck = cellKey(affected[i][0], affected[i][1]);
+      if (ck in grid) {
+        if (grid[ck] !== target) score += 2;
+        else score -= 1;
+      }
+    }
+    if (score > bestScore) { bestScore = score; bestCell = [q, r]; }
+  }
+  return bestCell;
+}
+
+function showHint() {
+  hintCell = computeHint();
+  renderGrid();
+}
+
+function hexToPixel(q, r, cx0, cy0) {
+  const x = HEX_SIZE * Math.sqrt(3) * (q + r / 2);
+  const y = HEX_SIZE * 1.5 * r;
+  return [cx0 + x, cy0 + y];
+}
+
+function renderGrid() {
+  const svg = document.getElementById('hex-svg');
+  const padding = HEX_SIZE + 8;
+  const W = HEX_SIZE * Math.sqrt(3) * (gridSize * 2 + 1) + padding * 2;
+  const H = HEX_SIZE * 1.5 * (gridSize * 2 + 1) + padding * 2 + HEX_SIZE;
+  svg.setAttribute('width', Math.ceil(W));
+  svg.setAttribute('height', Math.ceil(H));
+  svg.setAttribute('viewBox', '0 0 ' + Math.ceil(W) + ' ' + Math.ceil(H));
+  svg.innerHTML = '';
+
+  const cx0 = W / 2;
+  const cy0 = H / 2;
+
+  for (const k in grid) {
+    const parts = k.split(',');
+    const q = parseInt(parts[0]), r = parseInt(parts[1]);
+    const [px, py] = hexToPixel(q, r, cx0, cy0);
+    const isHint = hintCell && hintCell[0] === q && hintCell[1] === r;
+    const state = grid[k];
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('role', 'button');
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('aria-label', 'Tile ' + k + ' ' + (state ? 'on' : 'off'));
+    g.style.cursor = 'pointer';
+
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', hexPoints(px, py, HEX_SIZE - 2));
+    poly.setAttribute('fill', state === 1 ? '#a78bfa' : '#374151');
+    poly.setAttribute('stroke', isHint ? '#fbbf24' : '#111827');
+    poly.setAttribute('stroke-width', isHint ? '3' : '1.5');
+    poly.style.transition = 'fill 0.15s';
+    if (isHint) {
+      poly.setAttribute('filter', 'url(#glow)');
+    }
+
+    g.appendChild(poly);
+
+    if (isHint) {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', px);
+      circle.setAttribute('cy', py);
+      circle.setAttribute('r', '6');
+      circle.setAttribute('fill', '#fbbf24');
+      g.appendChild(circle);
+    }
+
+    g.addEventListener('click', (function(qq, rr){ return function(){ applyToggle(qq,rr); renderGrid(); }; })(q, r));
+    g.addEventListener('keydown', (function(qq, rr){ return function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); applyToggle(qq,rr); renderGrid(); } }; })(q, r));
+
+    svg.appendChild(g);
+  }
+
+  // Add glow filter def
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = '<filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+  svg.insertBefore(defs, svg.firstChild);
+}
+
+newGame();
+</script>
+</body>
+</html>
